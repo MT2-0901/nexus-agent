@@ -1,0 +1,22 @@
+mode: MASTER_SUB
+fallbackMode: SINGLE
+root: master
+nodes:
+  master:
+    kind: LLM
+    name: master-agent
+    description: Master agent coordinating sub-agents
+    instruction: "Delegate to planner-agent and executor-agent when useful, then synthesize a final answer."
+    subAgents:
+      - planner
+      - executor
+  planner:
+    kind: LLM
+    name: planner-agent
+    description: Plan decomposition specialist
+    instruction: "Break tasks into executable steps and constraints."
+  executor:
+    kind: LLM
+    name: executor-agent
+    description: Execution specialist
+    instruction: "Execute implementation details and return concrete outputs."

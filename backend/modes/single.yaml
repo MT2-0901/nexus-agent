@@ -1,0 +1,8 @@
+mode: SINGLE
+root: single
+nodes:
+  single:
+    kind: LLM
+    name: single-agent
+    description: Single-agent execution
+    instruction: "Handle the entire request independently with clear reasoning and concise delivery."

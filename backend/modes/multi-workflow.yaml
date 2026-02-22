@@ -1,0 +1,33 @@
+mode: MULTI_WORKFLOW
+fallbackMode: MASTER_SUB
+root: root-sequence
+nodes:
+  root-sequence:
+    kind: SEQUENTIAL
+    name: multi-workflow-root
+    description: Multi-agent sequential orchestration
+    subAgents:
+      - parallel-phase
+      - reviewer
+  parallel-phase:
+    kind: PARALLEL
+    name: parallel-phase
+    description: Parallel analysis and build
+    subAgents:
+      - researcher
+      - builder
+  researcher:
+    kind: LLM
+    name: researcher-agent
+    description: Collect requirements and assumptions
+    instruction: "Focus on analysis, requirements, and risks."
+  builder:
+    kind: LLM
+    name: builder-agent
+    description: Design and build solution details
+    instruction: "Draft implementation-oriented outputs based on research."
+  reviewer:
+    kind: LLM
+    name: reviewer-agent
+    description: Quality and consistency reviewer
+    instruction: "Review and reconcile outputs into production-ready response."

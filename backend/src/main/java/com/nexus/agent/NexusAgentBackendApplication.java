@@ -5,10 +5,10 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 @SpringBootApplication
-@ConfigurationPropertiesScan
-public class NexusAgentApplication {
+@ConfigurationPropertiesScan("com.nexus.agent.config")
+public class NexusAgentBackendApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(NexusAgentApplication.class, args);
+        SpringApplication.run(NexusAgentBackendApplication.class, args);
     }
 }

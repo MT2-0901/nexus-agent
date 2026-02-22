@@ -1,11 +1,27 @@
 server:
   port: 8080
 
+spring:
+  datasource:
+    url: jdbc:sqlite:./nexus-agent.db
+    driver-class-name: org.sqlite.JDBC
+
 nexus:
   adk:
     app-name: nexus-agent
     model: gemini-2.0-flash
+    available-models:
+      - gemini-2.0-flash
+      - gemini-2.5-flash
+      - gemini-2.5-pro
     default-user-id: local-user
     default-session-prefix: sess
   skills:
     path: skills
+  modes:
+    path: modes
+  persistence:
+    enabled: true
+    provider: SQLITE
+    history-default-limit: 20
+    history-max-limit: 100

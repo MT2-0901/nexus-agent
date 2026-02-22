@@ -10,7 +10,10 @@ import com.google.genai.types.Part;
 import com.nexus.agent.api.dto.ChatRequest;
 import com.nexus.agent.api.dto.ChatResponse;
 import com.nexus.agent.config.AdkProperties;
+import com.nexus.agent.config.PersistenceProperties;
 import com.nexus.agent.domain.AgentMode;
+import com.nexus.agent.persistence.ChatHistoryRecord;
+import com.nexus.agent.persistence.ChatHistoryStore;
 import com.nexus.agent.skills.SkillDefinition;
 import com.nexus.agent.skills.SkillRegistry;
 import org.springframework.stereotype.Service;
@@ -28,13 +31,19 @@ public class AgentOrchestratorService {
     private final AdkProperties adkProperties;
     private final AgentTopologyFactory topologyFactory;
     private final SkillRegistry skillRegistry;
+    private final ChatHistoryStore chatHistoryStore;
+    private final PersistenceProperties persistenceProperties;
 
     public AgentOrchestratorService(AdkProperties adkProperties,
                                     AgentTopologyFactory topologyFactory,
-                                    SkillRegistry skillRegistry) {
+                                    SkillRegistry skillRegistry,
+                                    ChatHistoryStore chatHistoryStore,
+                                    PersistenceProperties persistenceProperties) {
         this.adkProperties = adkProperties;
         this.topologyFactory = topologyFactory;
         this.skillRegistry = skillRegistry;
+        this.chatHistoryStore = chatHistoryStore;
+        this.persistenceProperties = persistenceProperties;
     }
 
     public ChatResponse chat(ChatRequest request) {
@@ -58,6 +67,19 @@ public class AgentOrchestratorService {
 
         String response = extractResponse(events);
         List<String> skillNames = activeSkills.stream().map(SkillDefinition::getName).toList();
+        Instant timestamp = Instant.now();
+
+        chatHistoryStore.save(new ChatHistoryRecord(
+                null,
+                sessionId,
+                userId,
+                mode.name(),
+                request.message(),
+                response,
+                skillNames,
+                events.size(),
+                timestamp
+        ));
 
         return new ChatResponse(
                 mode.name(),
@@ -65,8 +87,16 @@ public class AgentOrchestratorService {
                 response,
                 skillNames,
                 events.size(),
-                Instant.now()
+                timestamp
         );
+    }
+
+    public List<ChatHistoryRecord> listSessionHistory(String sessionId, Integer requestedLimit) {
+        if (!hasText(sessionId)) {
+            throw new IllegalArgumentException("sessionId is required");
+        }
+        int limit = normalizeLimit(requestedLimit);
+        return chatHistoryStore.listBySession(sessionId.trim(), limit);
     }
 
     private Set<String> normalizeSkillNames(List<String> names) {
@@ -110,5 +140,15 @@ public class AgentOrchestratorService {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private int normalizeLimit(Integer requestedLimit) {
+        int defaultLimit = Math.max(1, persistenceProperties.getHistoryDefaultLimit());
+        int maxLimit = Math.max(defaultLimit, persistenceProperties.getHistoryMaxLimit());
+        int limit = requestedLimit == null ? defaultLimit : requestedLimit;
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be greater than 0");
+        }
+        return Math.min(limit, maxLimit);
     }
 }

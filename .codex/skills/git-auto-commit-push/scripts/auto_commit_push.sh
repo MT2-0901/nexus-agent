@@ -72,7 +72,10 @@ if [[ -z "$(git status --porcelain)" ]]; then
   exit 0
 fi
 
-mapfile -t changed_files < <(git diff --cached --name-only)
+changed_files=()
+while IFS= read -r file; do
+  changed_files+=("$file")
+done < <(git diff --cached --name-only)
 file_count="${#changed_files[@]}"
 
 if [[ -z "$summary" ]]; then
