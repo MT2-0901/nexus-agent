@@ -1,0 +1,11 @@
+server:
+  port: 8080
+
+nexus:
+  adk:
+    app-name: nexus-agent
+    model: gemini-2.0-flash
+    default-user-id: local-user
+    default-session-prefix: sess
+  skills:
+    path: skills

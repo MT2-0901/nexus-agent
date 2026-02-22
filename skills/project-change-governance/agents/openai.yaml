@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project Change Governance"
+  short_description: "Enforce architecture-first change workflow"
+  default_prompt: "Use $project-change-governance to implement this task with architecture review, iteration-log update, and README update for any architecture change."

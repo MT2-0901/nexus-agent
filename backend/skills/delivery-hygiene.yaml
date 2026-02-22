@@ -1,0 +1,11 @@
+name: delivery-hygiene
+description: Ensure output is implementation-ready and includes follow-up notes.
+enabled: true
+appliesTo:
+  - MASTER_SUB
+  - MULTI_WORKFLOW
+instruction: >
+  Ensure final answer contains implementation steps, test strategy,
+  and operational caveats when assumptions are present.
+tools:
+  - echo

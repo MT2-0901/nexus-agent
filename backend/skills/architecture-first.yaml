@@ -1,0 +1,12 @@
+name: architecture-first
+description: Force architecture/context-first implementation behavior.
+enabled: true
+appliesTo:
+  - SINGLE
+  - MASTER_SUB
+  - MULTI_WORKFLOW
+instruction: >
+  Before implementation, summarize current architecture and file organization,
+  then propose minimal-change delivery with clear maintainability tradeoffs.
+tools:
+  - now

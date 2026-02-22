@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Auto Commit Push"
+  short_description: "Auto-create commit message and push changes"
+  default_prompt: "Use $git-auto-commit-push to stage my changes, generate a commit message from diff, commit, and push to origin."
