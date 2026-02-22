@@ -1,5 +1,35 @@
 # Iteration Log
 
+## 2026-02-22 - Add Chinese README
+
+### Summary
+Added a Chinese documentation counterpart for the project root README and linked it from the default English README for bilingual discoverability.
+
+### Scope
+- Feature / module: project root documentation
+- Problem solved: provide Chinese onboarding documentation without replacing the canonical English README
+- User-visible behavior change: users can open `README.zh-CN.md` directly from `README.md`
+
+### Implementation
+- Key design decisions:
+  - Keep `README.md` as the default entry and add a lightweight language link.
+  - Mirror the existing architecture/quick-start structure in Chinese for consistency.
+- Main files changed:
+  - `README.md`
+  - `README.zh-CN.md`
+  - `docs/iteration-log.md`
+- Backward compatibility notes:
+  - No runtime code changes; documentation-only update.
+
+### Validation
+- Tests run:
+  - None (documentation-only change)
+- Manual verification:
+  - Checked markdown structure and section parity between English and Chinese README files.
+
+### Architecture Impact
+- Architecture changed: No
+
 ## 2026-02-22 - Initial Multi-Agent Scaffold
 
 ### Summary

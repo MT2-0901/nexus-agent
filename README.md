@@ -2,6 +2,8 @@
 
 This repository is now scaffolded for a Java-based multi-agent project using **Google ADK** on the backend and **Vue3** on the frontend.
 
+中文文档: [`README.zh-CN.md`](README.zh-CN.md)
+
 ## Technical Architecture
 
 ### Backend (`backend/`)
