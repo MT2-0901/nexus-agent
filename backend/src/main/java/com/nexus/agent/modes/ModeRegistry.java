@@ -15,10 +15,12 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.EnumMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
@@ -34,7 +36,7 @@ public class ModeRegistry {
     private final AtomicReference<Map<AgentMode, ModeDefinition>> cache = new AtomicReference<>(Map.of());
 
     public ModeRegistry(ModeProperties modeProperties) {
-        this.modeDirectory = Paths.get(modeProperties.getPath());
+        this.modeDirectory = resolveDirectory(modeProperties.getPath());
     }
 
     @PostConstruct
@@ -84,6 +86,32 @@ public class ModeRegistry {
             throw new IllegalStateException("Missing mode definition for " + mode + " in " + modeDirectory.toAbsolutePath());
         }
         return definition;
+    }
+
+    private Path resolveDirectory(String configuredPath) {
+        Path configured = Paths.get(configuredPath).normalize().toAbsolutePath();
+        Set<Path> candidates = new LinkedHashSet<>();
+        candidates.add(configured);
+
+        Path configuredRelative = Paths.get(configuredPath).normalize();
+        if (!configuredRelative.isAbsolute()) {
+            candidates.add(Paths.get("backend").resolve(configuredRelative).normalize().toAbsolutePath());
+            if (configuredRelative.getNameCount() > 1 && "backend".equals(configuredRelative.getName(0).toString())) {
+                candidates.add(configuredRelative.subpath(1, configuredRelative.getNameCount()).normalize().toAbsolutePath());
+            }
+        }
+
+        for (Path candidate : candidates) {
+            if (Files.isDirectory(candidate)) {
+                if (!candidate.equals(configured)) {
+                    log.info("Mode directory {} not found from current working directory, fallback to {}",
+                            configured.toAbsolutePath(), candidate.toAbsolutePath());
+                }
+                return candidate.toAbsolutePath().normalize();
+            }
+        }
+
+        return configured.toAbsolutePath().normalize();
     }
 
     private boolean isSupported(Path path) {

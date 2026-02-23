@@ -4,8 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.google.adk.agents.BaseAgent;
 import com.google.adk.agents.RunConfig;
 import com.google.adk.events.Event;
-import com.google.adk.runner.InMemoryRunner;
 import com.google.adk.runner.Runner;
+import com.google.adk.sessions.BaseSessionService;
+import com.google.adk.sessions.Session;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
 import com.nexus.agent.api.dto.agui.AgUiMessage;
@@ -24,8 +25,10 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -36,15 +39,18 @@ public class AgUiProtocolService {
     private final AgentTopologyFactory topologyFactory;
     private final SkillRegistry skillRegistry;
     private final ChatHistoryStore chatHistoryStore;
+    private final BaseSessionService sessionService;
 
     public AgUiProtocolService(AdkProperties adkProperties,
                                AgentTopologyFactory topologyFactory,
                                SkillRegistry skillRegistry,
-                               ChatHistoryStore chatHistoryStore) {
+                               ChatHistoryStore chatHistoryStore,
+                               BaseSessionService sessionService) {
         this.adkProperties = adkProperties;
         this.topologyFactory = topologyFactory;
         this.skillRegistry = skillRegistry;
         this.chatHistoryStore = chatHistoryStore;
+        this.sessionService = sessionService;
     }
 
     public AgUiRunResult run(AgUiRunRequest request,
@@ -60,6 +66,8 @@ public class AgUiProtocolService {
         String sessionId = hasText(readString(props, "sessionId"))
                 ? readString(props, "sessionId").trim()
                 : threadId;
+        String llmBaseUrl = readString(props, "llmBaseUrl");
+        String llmApiKey = readString(props, "llmApiKey");
         if (!hasText(sessionId)) {
             sessionId = adkProperties.getDefaultSessionPrefix() + "-" + UUID.randomUUID();
         }
@@ -68,8 +76,13 @@ public class AgUiProtocolService {
         ParsedUserMessage userMessage = parseLatestUserMessage(request.messages());
 
         List<SkillDefinition> activeSkills = skillRegistry.resolve(mode, requiredSkills);
-        BaseAgent root = topologyFactory.create(mode, activeSkills, model);
-        Runner runner = new InMemoryRunner(root, adkProperties.getAppName());
+        BaseAgent root = topologyFactory.create(mode, activeSkills, model, llmBaseUrl, llmApiKey);
+        Runner runner = Runner.builder()
+                .agent(root)
+                .appName(adkProperties.getAppName())
+                .sessionService(sessionService)
+                .build();
+        ensureSessionExists(userId, sessionId);
 
         List<Event> events = new ArrayList<>();
         StringBuilder streamedText = new StringBuilder();
@@ -351,6 +364,21 @@ public class AgUiProtocolService {
 
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private void ensureSessionExists(String userId, String sessionId) {
+        Session existing = sessionService
+                .getSession(adkProperties.getAppName(), userId, sessionId, Optional.empty())
+                .blockingGet();
+        if (existing != null) {
+            return;
+        }
+        sessionService.createSession(
+                adkProperties.getAppName(),
+                userId,
+                new ConcurrentHashMap<>(),
+                sessionId
+        ).blockingGet();
     }
 
     private record ParsedUserMessage(Content content, String persistenceText) {

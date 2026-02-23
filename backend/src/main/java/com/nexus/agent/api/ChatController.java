@@ -3,10 +3,12 @@ package com.nexus.agent.api;
 import com.nexus.agent.api.dto.ChatRequest;
 import com.nexus.agent.api.dto.ChatResponse;
 import com.nexus.agent.api.dto.ChatHistoryItem;
+import com.nexus.agent.api.dto.ModelDiscoverRequest;
 import com.nexus.agent.api.dto.SkillView;
 import com.nexus.agent.config.AdkProperties;
 import com.nexus.agent.domain.AgentMode;
 import com.nexus.agent.service.AgentOrchestratorService;
+import com.nexus.agent.service.ModelDiscoveryService;
 import com.nexus.agent.skills.SkillRegistry;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -29,13 +31,16 @@ public class ChatController {
     private final AgentOrchestratorService orchestratorService;
     private final SkillRegistry skillRegistry;
     private final AdkProperties adkProperties;
+    private final ModelDiscoveryService modelDiscoveryService;
 
     public ChatController(AgentOrchestratorService orchestratorService,
                           SkillRegistry skillRegistry,
-                          AdkProperties adkProperties) {
+                          AdkProperties adkProperties,
+                          ModelDiscoveryService modelDiscoveryService) {
         this.orchestratorService = orchestratorService;
         this.skillRegistry = skillRegistry;
         this.adkProperties = adkProperties;
+        this.modelDiscoveryService = modelDiscoveryService;
     }
 
     @PostMapping("/chat")
@@ -100,5 +105,10 @@ public class ChatController {
     @GetMapping("/models")
     public List<String> models() {
         return adkProperties.getAvailableModels();
+    }
+
+    @PostMapping("/models/discover")
+    public List<String> discoverModels(@Valid @RequestBody ModelDiscoverRequest request) {
+        return modelDiscoveryService.discover(request);
     }
 }

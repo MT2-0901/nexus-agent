@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -31,7 +32,7 @@ public class SkillRegistry {
     private final AtomicReference<List<SkillDefinition>> cache = new AtomicReference<>(List.of());
 
     public SkillRegistry(SkillProperties skillProperties) {
-        this.skillDirectory = Paths.get(skillProperties.getPath());
+        this.skillDirectory = resolveDirectory(skillProperties.getPath());
     }
 
     @PostConstruct
@@ -100,5 +101,31 @@ public class SkillRegistry {
         } catch (Exception e) {
             throw new IllegalStateException("Failed parsing skill file: " + path.toAbsolutePath(), e);
         }
+    }
+
+    private Path resolveDirectory(String configuredPath) {
+        Path configured = Paths.get(configuredPath).normalize().toAbsolutePath();
+        Set<Path> candidates = new LinkedHashSet<>();
+        candidates.add(configured);
+
+        Path configuredRelative = Paths.get(configuredPath).normalize();
+        if (!configuredRelative.isAbsolute()) {
+            candidates.add(Paths.get("backend").resolve(configuredRelative).normalize().toAbsolutePath());
+            if (configuredRelative.getNameCount() > 1 && "backend".equals(configuredRelative.getName(0).toString())) {
+                candidates.add(configuredRelative.subpath(1, configuredRelative.getNameCount()).normalize().toAbsolutePath());
+            }
+        }
+
+        for (Path candidate : candidates) {
+            if (Files.isDirectory(candidate)) {
+                if (!candidate.equals(configured)) {
+                    log.info("Skill directory {} not found from current working directory, fallback to {}",
+                            configured.toAbsolutePath(), candidate.toAbsolutePath());
+                }
+                return candidate.toAbsolutePath().normalize();
+            }
+        }
+
+        return configured.toAbsolutePath().normalize();
     }
 }

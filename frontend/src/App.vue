@@ -3,17 +3,20 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 
-const CONFIG_STORAGE_KEY = 'nexus-agent-config-v2'
+const CONFIG_STORAGE_KEY = 'nexus-agent-config-v3'
 const SESSIONS_STORAGE_KEY = 'nexus-agent-sessions-v2'
 
 const modes = ref([])
 const models = ref([])
 const skills = ref([])
 const loadingOptions = ref(false)
+const loadingModels = ref(false)
 const loadingHistory = ref(false)
 const running = ref(false)
 const runStatus = ref('Idle')
 const runError = ref('')
+const modelSource = ref('Default')
+const showApiKey = ref(false)
 
 const inputText = ref('')
 const pendingImages = ref([])
@@ -26,8 +29,13 @@ const config = reactive({
   mode: 'SINGLE',
   model: '',
   userId: 'local-user',
+  modelBaseUrl: '',
+  modelApiKey: '',
   selectedSkillNames: []
 })
+
+const optionsReady = ref(false)
+let modelAutoReloadTimer = 0
 
 const activeSession = computed(() => sessions.value.find((item) => item.id === activeSessionId.value) || null)
 
@@ -35,6 +43,7 @@ onMounted(async () => {
   loadLocalConfig()
   loadLocalSessions()
   await loadOptions()
+  optionsReady.value = true
 })
 
 watch(
@@ -42,12 +51,24 @@ watch(
     mode: config.mode,
     model: config.model,
     userId: config.userId,
+    modelBaseUrl: config.modelBaseUrl,
+    modelApiKey: config.modelApiKey,
     selectedSkillNames: [...config.selectedSkillNames]
   }),
   (value) => {
     localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(value))
   },
   { deep: true }
+)
+
+watch(
+  () => [config.modelBaseUrl, config.modelApiKey],
+  () => {
+    if (!optionsReady.value) {
+      return
+    }
+    scheduleModelReload()
+  }
 )
 
 watch(
@@ -61,17 +82,14 @@ watch(
 async function loadOptions() {
   loadingOptions.value = true
   try {
-    const [modeRes, modelRes, skillRes] = await Promise.all([
+    runError.value = ''
+    const [modeRes, skillRes] = await Promise.all([
       fetch(`${apiBaseUrl}/modes`),
-      fetch(`${apiBaseUrl}/models`),
       fetch(`${apiBaseUrl}/skills`)
     ])
 
     if (modeRes.ok) {
       modes.value = await modeRes.json()
-    }
-    if (modelRes.ok) {
-      models.value = await modelRes.json()
     }
     if (skillRes.ok) {
       skills.value = await skillRes.json()
@@ -80,16 +98,11 @@ async function loadOptions() {
     if (!modes.value.length) {
       modes.value = ['SINGLE', 'MASTER_SUB', 'MULTI_WORKFLOW']
     }
-    if (!models.value.length) {
-      models.value = ['gemini-2.0-flash']
-    }
 
     if (!modes.value.includes(config.mode)) {
       config.mode = modes.value[0]
     }
-    if (!config.model || !models.value.includes(config.model)) {
-      config.model = models.value[0]
-    }
+    await reloadModels()
 
     const enabledSkillNames = skills.value.filter((item) => item.enabled).map((item) => item.name)
     if (!config.selectedSkillNames.length) {
@@ -106,6 +119,108 @@ async function loadOptions() {
   }
 }
 
+function scheduleModelReload() {
+  globalThis.clearTimeout(modelAutoReloadTimer)
+  modelAutoReloadTimer = globalThis.setTimeout(() => {
+    refreshModels()
+  }, 360)
+}
+
+async function refreshModels() {
+  try {
+    await reloadModels()
+  } catch (error) {
+    runError.value = `Load models failed: ${error.message}`
+  }
+}
+
+async function reloadModels() {
+  loadingModels.value = true
+  try {
+    runError.value = ''
+    let discovered = []
+    let providerError = ''
+    if (hasText(config.modelBaseUrl)) {
+      try {
+        discovered = await discoverModelsFromProvider()
+        modelSource.value = 'Provider'
+      } catch (error) {
+        providerError = error.message
+      }
+    }
+
+    if (!discovered.length) {
+      try {
+        discovered = await loadStaticModels()
+      } catch (error) {
+        const detail = providerError
+          ? `${error.message}; provider discovery error: ${providerError}`
+          : error.message
+        throw new Error(detail)
+      }
+      modelSource.value = 'Backend'
+    }
+
+    if (!discovered.length) {
+      discovered = ['gemini-2.0-flash']
+      modelSource.value = 'Fallback'
+    }
+
+    models.value = discovered
+    if (!config.model || !models.value.includes(config.model)) {
+      config.model = models.value[0]
+    }
+  } finally {
+    loadingModels.value = false
+  }
+}
+
+async function discoverModelsFromProvider() {
+  const response = await fetch(`${apiBaseUrl}/models/discover`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      baseUrl: config.modelBaseUrl.trim(),
+      apiKey: config.modelApiKey.trim()
+    })
+  })
+
+  if (!response.ok) {
+    const reason = await readErrorMessage(response)
+    throw new Error(`discover request failed (${response.status}): ${reason}`)
+  }
+  return normalizeModelList(await response.json())
+}
+
+async function loadStaticModels() {
+  const response = await fetch(`${apiBaseUrl}/models`)
+  if (!response.ok) {
+    throw new Error(`models request failed: ${response.status}`)
+  }
+  return normalizeModelList(await response.json())
+}
+
+function normalizeModelList(payload) {
+  if (!Array.isArray(payload)) {
+    return []
+  }
+  return [...new Set(payload.map((item) => String(item || '').trim()).filter((item) => item.length > 0))]
+}
+
+async function readErrorMessage(response) {
+  try {
+    const payload = await response.json()
+    if (payload && typeof payload.message === 'string' && payload.message.trim()) {
+      return payload.message.trim()
+    }
+  } catch {
+    // Ignore non-JSON body.
+  }
+  return response.statusText || 'unknown error'
+}
+
 function loadLocalConfig() {
   try {
     const raw = localStorage.getItem(CONFIG_STORAGE_KEY)
@@ -116,6 +231,8 @@ function loadLocalConfig() {
     config.mode = parsed.mode || config.mode
     config.model = parsed.model || config.model
     config.userId = parsed.userId || config.userId
+    config.modelBaseUrl = parsed.modelBaseUrl || config.modelBaseUrl
+    config.modelApiKey = parsed.modelApiKey || config.modelApiKey
     config.selectedSkillNames = Array.isArray(parsed.selectedSkillNames) ? parsed.selectedSkillNames : []
   } catch {
     // Ignore corrupted local config.
@@ -318,6 +435,8 @@ async function sendMessage() {
       model: config.model,
       userId: config.userId,
       sessionId: activeSession.value.id,
+      llmBaseUrl: config.modelBaseUrl,
+      llmApiKey: config.modelApiKey,
       skillNames: config.selectedSkillNames
     }
   }
@@ -430,6 +549,10 @@ function getAssistantDraftText() {
   const target = activeSession.value.messages.find((item) => item.id === assistantDraftId.value)
   return target?.text || ''
 }
+
+function hasText(value) {
+  return typeof value === 'string' && value.trim().length > 0
+}
 </script>
 
 <template>
@@ -443,24 +566,51 @@ function getAssistantDraftText() {
       <section class="card">
         <div class="section-head">
           <h2>Agent Config</h2>
-          <span v-if="loadingOptions" class="tag">Loading</span>
+          <span v-if="loadingOptions || loadingModels" class="tag">Loading</span>
         </div>
         <label>
-          Mode
-          <select v-model="config.mode">
-            <option v-for="item in modes" :key="item" :value="item">{{ item }}</option>
-          </select>
+          Provider Base URL
+          <input v-model.trim="config.modelBaseUrl" placeholder="https://api.openai.com/v1" />
         </label>
         <label>
-          Model
-          <select v-model="config.model">
-            <option v-for="item in models" :key="item" :value="item">{{ item }}</option>
-          </select>
+          API Key
+          <div class="input-inline">
+            <input
+              v-model.trim="config.modelApiKey"
+              :type="showApiKey ? 'text' : 'password'"
+              placeholder="sk-..."
+              autocomplete="off"
+            />
+            <button type="button" class="ghost-btn" @click="showApiKey = !showApiKey">
+              {{ showApiKey ? 'Hide' : 'Show' }}
+            </button>
+          </div>
         </label>
-        <label>
-          User Id
-          <input v-model.trim="config.userId" placeholder="local-user" />
-        </label>
+        <div class="actions-inline">
+          <button type="button" class="ghost-btn" :disabled="loadingModels" @click="refreshModels">
+            {{ loadingModels ? 'Refreshing...' : 'Refresh Models' }}
+          </button>
+          <small>Auto refresh when URL or API key changes.</small>
+        </div>
+        <div class="config-grid">
+          <label>
+            Mode
+            <select v-model="config.mode">
+              <option v-for="item in modes" :key="item" :value="item">{{ item }}</option>
+            </select>
+          </label>
+          <label>
+            Model
+            <select v-model="config.model">
+              <option v-for="item in models" :key="item" :value="item">{{ item }}</option>
+            </select>
+            <small>Source: {{ modelSource }}</small>
+          </label>
+          <label>
+            User Id
+            <input v-model.trim="config.userId" placeholder="local-user" />
+          </label>
+        </div>
       </section>
 
       <section class="card">

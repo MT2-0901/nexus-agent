@@ -3,7 +3,6 @@ package com.nexus.agent.service;
 import com.google.adk.agents.BaseAgent;
 import com.google.adk.agents.RunConfig;
 import com.google.adk.events.Event;
-import com.google.adk.runner.InMemoryRunner;
 import com.google.adk.runner.Runner;
 import com.google.genai.types.Content;
 import com.google.genai.types.Part;
@@ -16,13 +15,17 @@ import com.nexus.agent.persistence.ChatHistoryRecord;
 import com.nexus.agent.persistence.ChatHistoryStore;
 import com.nexus.agent.skills.SkillDefinition;
 import com.nexus.agent.skills.SkillRegistry;
+import com.google.adk.sessions.BaseSessionService;
+import com.google.adk.sessions.Session;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -33,17 +36,20 @@ public class AgentOrchestratorService {
     private final SkillRegistry skillRegistry;
     private final ChatHistoryStore chatHistoryStore;
     private final PersistenceProperties persistenceProperties;
+    private final BaseSessionService sessionService;
 
     public AgentOrchestratorService(AdkProperties adkProperties,
                                     AgentTopologyFactory topologyFactory,
                                     SkillRegistry skillRegistry,
                                     ChatHistoryStore chatHistoryStore,
-                                    PersistenceProperties persistenceProperties) {
+                                    PersistenceProperties persistenceProperties,
+                                    BaseSessionService sessionService) {
         this.adkProperties = adkProperties;
         this.topologyFactory = topologyFactory;
         this.skillRegistry = skillRegistry;
         this.chatHistoryStore = chatHistoryStore;
         this.persistenceProperties = persistenceProperties;
+        this.sessionService = sessionService;
     }
 
     public ChatResponse chat(ChatRequest request) {
@@ -53,12 +59,17 @@ public class AgentOrchestratorService {
         List<SkillDefinition> activeSkills = skillRegistry.resolve(mode, requiredSkills);
         BaseAgent root = topologyFactory.create(mode, activeSkills);
 
-        Runner runner = new InMemoryRunner(root, adkProperties.getAppName());
+        Runner runner = Runner.builder()
+                .agent(root)
+                .appName(adkProperties.getAppName())
+                .sessionService(sessionService)
+                .build();
 
         String userId = hasText(request.userId()) ? request.userId() : adkProperties.getDefaultUserId();
         String sessionId = hasText(request.sessionId())
                 ? request.sessionId()
                 : adkProperties.getDefaultSessionPrefix() + "-" + UUID.randomUUID();
+        ensureSessionExists(userId, sessionId);
 
         Content userMessage = Content.fromParts(Part.fromText(request.message()));
         List<Event> events = runner.runAsync(userId, sessionId, userMessage, RunConfig.builder().build())
@@ -150,5 +161,20 @@ public class AgentOrchestratorService {
             throw new IllegalArgumentException("limit must be greater than 0");
         }
         return Math.min(limit, maxLimit);
+    }
+
+    private void ensureSessionExists(String userId, String sessionId) {
+        Session existing = sessionService
+                .getSession(adkProperties.getAppName(), userId, sessionId, Optional.empty())
+                .blockingGet();
+        if (existing != null) {
+            return;
+        }
+        sessionService.createSession(
+                adkProperties.getAppName(),
+                userId,
+                new ConcurrentHashMap<>(),
+                sessionId
+        ).blockingGet();
     }
 }

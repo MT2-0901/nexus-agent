@@ -4,7 +4,11 @@ import com.google.adk.agents.BaseAgent;
 import com.google.adk.agents.LlmAgent;
 import com.google.adk.agents.ParallelAgent;
 import com.google.adk.agents.SequentialAgent;
+import com.google.adk.models.BaseLlm;
+import com.google.adk.models.Gemini;
 import com.google.adk.tools.BaseTool;
+import com.google.genai.Client;
+import com.google.genai.types.HttpOptions;
 import com.nexus.agent.config.AdkProperties;
 import com.nexus.agent.domain.AgentMode;
 import com.nexus.agent.modes.ModeDefinition;
@@ -19,7 +23,6 @@ import org.springframework.stereotype.Component;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 
 @Component
@@ -43,20 +46,33 @@ public class AgentTopologyFactory {
     }
 
     public BaseAgent create(AgentMode mode, List<SkillDefinition> activeSkills) {
-        return create(mode, activeSkills, null);
+        return create(mode, activeSkills, null, null, null);
     }
 
     public BaseAgent create(AgentMode mode, List<SkillDefinition> activeSkills, String modelOverride) {
+        return create(mode, activeSkills, modelOverride, null, null);
+    }
+
+    public BaseAgent create(AgentMode mode,
+                            List<SkillDefinition> activeSkills,
+                            String modelOverride,
+                            String llmBaseUrl,
+                            String llmApiKey) {
         String skillPrompt = skillPromptComposer.compose(activeSkills);
         List<BaseTool> tools = toolCatalog.resolve(activeSkills);
         String model = resolveModel(modelOverride);
-        return createWithFallback(mode, skillPrompt, tools, model);
+        RuntimeLlmOptions runtimeLlmOptions = new RuntimeLlmOptions(
+                normalizeOptional(llmBaseUrl),
+                normalizeOptional(llmApiKey)
+        );
+        return createWithFallback(mode, skillPrompt, tools, model, runtimeLlmOptions);
     }
 
     private BaseAgent createWithFallback(AgentMode requestedMode,
                                          String skillPrompt,
                                          List<BaseTool> tools,
-                                         String model) {
+                                         String model,
+                                         RuntimeLlmOptions runtimeLlmOptions) {
         AgentMode current = requestedMode;
         Set<AgentMode> visited = EnumSet.noneOf(AgentMode.class);
         RuntimeException lastError = null;
@@ -64,7 +80,7 @@ public class AgentTopologyFactory {
         while (current != null && visited.add(current)) {
             ModeDefinition definition = modeRegistry.getRequired(current);
             try {
-                return buildNode(definition, definition.getRoot(), skillPrompt, tools, model, new ArrayList<>());
+                return buildNode(definition, definition.getRoot(), skillPrompt, tools, model, runtimeLlmOptions, new ArrayList<>());
             } catch (RuntimeException ex) {
                 lastError = ex;
                 AgentMode fallbackMode = definition.getFallbackMode();
@@ -84,6 +100,7 @@ public class AgentTopologyFactory {
                                 String skillPrompt,
                                 List<BaseTool> tools,
                                 String model,
+                                RuntimeLlmOptions runtimeLlmOptions,
                                 List<String> stack) {
         if (stack.contains(nodeRef)) {
             throw new IllegalStateException("Cycle detected in mode " + definition.getMode() + ": " + stack + " -> " + nodeRef);
@@ -96,13 +113,13 @@ public class AgentTopologyFactory {
         }
 
         List<BaseAgent> children = node.getSubAgents().stream()
-                .map(ref -> buildNode(definition, ref, skillPrompt, tools, model, stack))
+                .map(ref -> buildNode(definition, ref, skillPrompt, tools, model, runtimeLlmOptions, stack))
                 .toList();
 
         stack.remove(stack.size() - 1);
 
         return switch (node.getKind()) {
-            case LLM -> buildLlmNode(node, children, skillPrompt, tools, model);
+            case LLM -> buildLlmNode(node, children, skillPrompt, tools, model, runtimeLlmOptions);
             case PARALLEL -> ParallelAgent.builder()
                     .name(node.getName())
                     .description(node.getDescription())
@@ -120,16 +137,17 @@ public class AgentTopologyFactory {
                                    List<BaseAgent> children,
                                    String skillPrompt,
                                    List<BaseTool> tools,
-                                   String model) {
+                                   String model,
+                                   RuntimeLlmOptions runtimeLlmOptions) {
         String instructionBase = node.getInstruction() == null ? "" : node.getInstruction();
         String instruction = instructionBase + skillPrompt;
 
         LlmAgent.Builder builder = LlmAgent.builder()
                 .name(node.getName())
                 .description(node.getDescription())
-                .model(model)
                 .instruction(instruction)
                 .tools(tools);
+        applyModel(builder, model, runtimeLlmOptions);
 
         if (!children.isEmpty()) {
             builder.subAgents(children.toArray(BaseAgent[]::new));
@@ -141,13 +159,56 @@ public class AgentTopologyFactory {
         if (modelOverride == null || modelOverride.isBlank()) {
             return adkProperties.getModel();
         }
-        String normalized = modelOverride.trim();
-        boolean allowed = adkProperties.getAvailableModels().stream()
-                .map(item -> item == null ? "" : item.trim().toLowerCase(Locale.ROOT))
-                .anyMatch(item -> item.equals(normalized.toLowerCase(Locale.ROOT)));
-        if (!allowed) {
-            throw new IllegalArgumentException("Unsupported model: " + normalized);
+        return modelOverride.trim();
+    }
+
+    private void applyModel(LlmAgent.Builder builder, String modelName, RuntimeLlmOptions runtimeLlmOptions) {
+        if (!runtimeLlmOptions.hasOverrides()) {
+            builder.model(modelName);
+            return;
+        }
+        builder.model(buildRuntimeModel(modelName, runtimeLlmOptions));
+    }
+
+    private BaseLlm buildRuntimeModel(String modelName, RuntimeLlmOptions runtimeLlmOptions) {
+        if (hasText(runtimeLlmOptions.baseUrl())) {
+            Client.Builder clientBuilder = Client.builder()
+                    .httpOptions(HttpOptions.builder().baseUrl(runtimeLlmOptions.baseUrl()).build());
+            if (hasText(runtimeLlmOptions.apiKey())) {
+                clientBuilder.apiKey(runtimeLlmOptions.apiKey());
+            }
+            return Gemini.builder()
+                    .modelName(modelName)
+                    .apiClient(clientBuilder.build())
+                    .build();
+        }
+        if (hasText(runtimeLlmOptions.apiKey())) {
+            return Gemini.builder()
+                    .modelName(modelName)
+                    .apiKey(runtimeLlmOptions.apiKey())
+                    .build();
+        }
+        return Gemini.builder().modelName(modelName).build();
+    }
+
+    private String normalizeOptional(String value) {
+        if (!hasText(value)) {
+            return null;
+        }
+        String normalized = value.trim();
+        if (normalized.startsWith("http://") || normalized.startsWith("https://")) {
+            return normalized.replaceAll("/+$", "");
         }
         return normalized;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private record RuntimeLlmOptions(String baseUrl, String apiKey) {
+        private boolean hasOverrides() {
+            return (baseUrl != null && !baseUrl.isBlank()) || (apiKey != null && !apiKey.isBlank());
+        }
     }
 }

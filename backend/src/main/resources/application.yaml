@@ -17,9 +17,9 @@ nexus:
     default-user-id: local-user
     default-session-prefix: sess
   skills:
-    path: skills
+    path: backend/skills
   modes:
-    path: modes
+    path: backend/modes
   persistence:
     enabled: true
     provider: SQLITE
