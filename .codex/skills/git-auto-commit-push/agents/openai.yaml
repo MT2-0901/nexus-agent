@@ -1,4 +1,4 @@
 interface:
   display_name: "Git Auto Commit Push"
-  short_description: "Auto-create commit message and push changes"
-  default_prompt: "Use $git-auto-commit-push to stage my changes, generate a commit message from diff, commit, and push to origin."
+  short_description: "Auto-group changes into typed commits and push"
+  default_prompt: "Use $git-auto-commit-push to classify my changes into feat/fix/refactor/docs/chore commits, create grouped commits, and push to origin."
