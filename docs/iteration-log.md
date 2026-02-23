@@ -1,5 +1,147 @@
 # Iteration Log
 
+## 2026-02-22 - Wire AG-UI Runtime API Key/Base URL into ADK Model Execution
+
+### Summary
+Fixed runtime credential usage so AG-UI `llmApiKey`/`llmBaseUrl` from frontend config are applied during ADK model execution, preventing hard dependency on process-level `GOOGLE_API_KEY` for this path.
+
+### Scope
+- Feature / module: backend AG-UI run execution and topology model binding
+- Problem solved: runtime requests ignored forwarded provider credentials, causing errors like `API key must either be provided or set in ... GOOGLE_API_KEY ...`
+- User-visible behavior change: AG-UI runs now pass configured API key/base URL to model client construction when provided
+
+### Implementation
+- Key design decisions:
+  - Read `llmBaseUrl` and `llmApiKey` from AG-UI `forwardedProps` in protocol service and pass them through topology creation.
+  - Extend `AgentTopologyFactory` with runtime LLM options and apply them at `LlmAgent` construction.
+  - Build runtime Gemini model instances using `Gemini.builder()`:
+    - `apiKey(...)` path when only key is provided
+    - `apiClient(Client.builder().httpOptions(HttpOptions.builder().baseUrl(...)))` path when base URL is provided
+- Main files changed:
+  - `backend/src/main/java/com/nexus/agent/service/AgUiProtocolService.java`
+  - `backend/src/main/java/com/nexus/agent/service/AgentTopologyFactory.java`
+  - `docs/iteration-log.md`
+- Backward compatibility notes:
+  - Existing API contracts are unchanged.
+  - When no runtime key/base URL is provided, behavior remains unchanged.
+
+### Validation
+- Tests run:
+  - `mvn -f backend/pom.xml -q -DskipTests compile`
+  - `mvn -f backend/pom.xml -q test`
+- Manual verification:
+  - Confirmed backend compiles and tests pass with runtime model option plumbing.
+
+### Architecture Impact
+- Architecture changed: No
+
+## 2026-02-22 - Fix ADK Session Recovery for AG-UI and Chat Runs
+
+### Summary
+Eliminated intermittent `Session not found` runtime failures by introducing shared ADK session management and explicit create-if-missing session recovery before each run.
+
+### Scope
+- Feature / module: backend ADK runner execution (`/api/v1/chat`, `/api/v1/agui/run`)
+- Problem solved: requests using existing/stale session IDs could fail with session lookup errors from ADK runtime
+- User-visible behavior change: chat and AG-UI streaming runs now recover missing sessions automatically instead of returning `Session not found` errors
+
+### Implementation
+- Key design decisions:
+  - Add a Spring-managed shared `BaseSessionService` (`InMemorySessionService`) so session registry is reused across requests.
+  - Switch runner creation to `Runner.builder()` and inject the shared session service in both orchestrator paths.
+  - Add pre-run `ensureSessionExists(userId, sessionId)` guard that creates the session when absent.
+- Main files changed:
+  - `backend/src/main/java/com/nexus/agent/config/AdkRuntimeConfig.java`
+  - `backend/src/main/java/com/nexus/agent/service/AgentOrchestratorService.java`
+  - `backend/src/main/java/com/nexus/agent/service/AgUiProtocolService.java`
+  - `docs/iteration-log.md`
+- Backward compatibility notes:
+  - API contracts and payload formats remain unchanged.
+
+### Validation
+- Tests run:
+  - `mvn -f backend/pom.xml -q -DskipTests compile`
+- Manual verification:
+  - Confirmed backend compiles successfully with shared session-service wiring and recovery helper methods.
+
+### Architecture Impact
+- Architecture changed: No
+
+## 2026-02-22 - Fix Root-Startup Path Resolution for Modes and Skills
+
+### Summary
+Made runtime resource path resolution resilient to different working directories so backend startup works both from repository root and from `backend/`.
+
+### Scope
+- Feature / module: backend mode/skill registry initialization
+- Problem solved: launching from repository root resolved `modes`/`skills` to root-level directories, causing missing definition errors
+- User-visible behavior change: startup now finds `backend/modes` and `backend/skills` automatically when needed
+
+### Implementation
+- Key design decisions:
+  - Set default runtime resource paths to `backend/modes` and `backend/skills` to avoid conflicts with root-level tooling folders.
+  - Add directory fallback resolution inside registries for relative paths: configured path -> `backend/<path>` -> strip leading `backend/` when configured with prefix.
+  - Log fallback choice explicitly for observability.
+- Main files changed:
+  - `backend/src/main/java/com/nexus/agent/modes/ModeRegistry.java`
+  - `backend/src/main/java/com/nexus/agent/skills/SkillRegistry.java`
+  - `backend/src/main/resources/application.yaml`
+  - `docs/iteration-log.md`
+- Backward compatibility notes:
+  - Existing configs continue to work; this is additive fallback behavior.
+
+### Validation
+- Tests run:
+  - `mvn -q -DskipTests compile`
+  - `mvn -f backend/pom.xml spring-boot:run -Dspring-boot.run.arguments=--server.port=19090`
+- Manual verification:
+  - Confirmed startup no longer fails with missing mode definitions when launched from root context.
+
+### Architecture Impact
+- Architecture changed: No
+
+## 2026-02-22 - Add Provider Config UI and Automatic Model Discovery
+
+### Summary
+Enhanced the frontend console styling and added provider `Base URL` / `API Key` configuration with automatic available-model loading, backed by a new server-side model discovery API.
+
+### Scope
+- Feature / module: frontend operator console + backend model metadata API
+- Problem solved: model list was static and disconnected from runtime provider credentials; frontend lacked dedicated provider configuration controls
+- User-visible behavior change: users can configure provider URL/key in UI, auto-refresh model options, and manually refresh models on demand
+
+### Implementation
+- Key design decisions:
+  - Add `POST /api/v1/models/discover` backend proxy endpoint to avoid browser CORS issues and support credential-based upstream model discovery.
+  - Keep existing `GET /api/v1/models` as fallback for static configured models.
+  - Relax runtime model override validation in topology factory so discovered provider models can be selected directly.
+  - Persist provider config in frontend local storage and trigger debounced auto-refresh when URL/key changes.
+- Main files changed:
+  - `backend/src/main/java/com/nexus/agent/api/ChatController.java`
+  - `backend/src/main/java/com/nexus/agent/api/dto/ModelDiscoverRequest.java`
+  - `backend/src/main/java/com/nexus/agent/service/ModelDiscoveryService.java`
+  - `backend/src/main/java/com/nexus/agent/service/AgentTopologyFactory.java`
+  - `frontend/src/App.vue`
+  - `frontend/src/styles.css`
+  - `README.md`
+  - `README.zh-CN.md`
+  - `docs/iteration-log.md`
+- Backward compatibility notes:
+  - Existing API routes remain available.
+  - When provider config is not set, model loading behavior remains compatible via `GET /api/v1/models`.
+
+### Validation
+- Tests run:
+  - `mvn -f backend/pom.xml -q -DskipTests compile`
+  - `mvn -f backend/pom.xml test -q`
+  - `cd frontend && npm run build`
+- Manual verification:
+  - Confirmed frontend build includes new config panel and styles.
+  - Confirmed backend compiles with new model discovery endpoint and service wiring.
+
+### Architecture Impact
+- Architecture changed: No
+
 ## 2026-02-22 - Improve IntelliJ Project Recognition and One-Click Backend Start
 
 ### Summary

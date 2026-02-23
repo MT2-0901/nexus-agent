@@ -43,6 +43,7 @@ Supported agent topologies:
 - Implemented event sequence with `RUN_STARTED`, `TEXT_MESSAGE_START`, `TEXT_MESSAGE_CONTENT`, `TEXT_MESSAGE_END`, `RUN_FINISHED`, and `RUN_ERROR`.
 - Supports multimodal user input (`text` + `image` content blocks with base64 payload).
 - Supports runtime agent config via `forwardedProps` (mode/model/userId/sessionId/skillNames).
+- Supports upstream model discovery via provider credentials (`baseUrl` + `apiKey`) through backend proxy.
 
 APIs:
 - `POST /api/v1/chat`
@@ -52,11 +53,13 @@ APIs:
 - `POST /api/v1/skills/reload`
 - `GET /api/v1/modes`
 - `GET /api/v1/models`
+- `POST /api/v1/models/discover`
 
 ### Frontend (`frontend/`)
 - Vue3 + Vite AG-UI client console
 - Current state:
-  - agent runtime config panel (mode/model/user/skills)
+  - agent runtime config panel (mode/model/user/skills/provider URL/API key)
+  - auto model discovery and refresh from configured provider endpoint
   - AG-UI stream chat UI
   - image upload and multimodal send
   - local session persistence and backend history sync

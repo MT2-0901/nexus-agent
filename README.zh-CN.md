@@ -41,6 +41,7 @@
 - 已实现事件序列：`RUN_STARTED`、`TEXT_MESSAGE_START`、`TEXT_MESSAGE_CONTENT`、`TEXT_MESSAGE_END`、`RUN_FINISHED`、`RUN_ERROR`。
 - 支持多模态用户输入（`text` + `image` 内容块，图片 base64 负载）。
 - 支持通过 `forwardedProps` 传递运行时配置（mode/model/userId/sessionId/skillNames）。
+- 支持通过后端代理根据提供方鉴权信息（`baseUrl` + `apiKey`）动态发现模型列表。
 
 API:
 - `POST /api/v1/chat`
@@ -50,11 +51,13 @@ API:
 - `POST /api/v1/skills/reload`
 - `GET /api/v1/modes`
 - `GET /api/v1/models`
+- `POST /api/v1/models/discover`
 
 ### 前端 (`frontend/`)
 - Vue3 + Vite AG-UI 控制台
 - 当前状态:
-  - agent 运行配置面板（mode/model/user/skills）
+  - agent 运行配置面板（mode/model/user/skills/provider URL/API key）
+  - 基于提供方接口的可用模型自动发现与刷新
   - AG-UI 流式聊天界面
   - 图片上传与多模态发送
   - 本地会话保存与后端历史同步

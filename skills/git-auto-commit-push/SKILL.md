@@ -1,11 +1,11 @@
 ---
 name: git-auto-commit-push
-description: Automatically stage local git changes, generate a commit message from the current diff, create the commit, and push to the remote branch. Use when the user asks to auto-fill commit messages, commit current work, or push code directly to remote without manual git message writing.
+description: Automatically stage local git changes, classify them by commit type, create grouped commits, and push to the remote branch. Use when the user asks to auto-fill commit messages, commit current work, or push code directly to remote while keeping commits logically separated by change type.
 ---
 
 # Git Auto Commit Push
 
-Use this skill to complete git delivery in one pass: stage -> message -> commit -> push.
+Use this skill to complete git delivery in one pass: classify -> grouped commits -> push.
 
 ## Workflow
 
@@ -14,21 +14,26 @@ Use this skill to complete git delivery in one pass: stage -> message -> commit 
 3. Run `scripts/auto_commit_push.sh`.
 4. Report back:
    - branch
-   - commit hash
-   - commit title
+   - commit hashes
+   - commit titles
    - push destination
 
 ## Message Strategy
 
-Generate commit title from staged diff summary:
-- Default format: `chore(repo): update <N> files`
-- If change type is obvious from diff, prefer one of:
-  - `feat(scope): ...`
-  - `fix(scope): ...`
-  - `refactor(scope): ...`
-  - `docs(scope): ...`
+Default behavior generates multiple commits, not one all-in commit.
 
-Commit body rules:
+Type inference priority:
+- `docs`: paths under `docs/`, markdown files (`*.md`), README changes
+- `fix`: paths containing `fix` or `bug`
+- `refactor`: paths containing `refactor`
+- `feat`: application source and runtime topology/skill definitions (`backend/src`, `frontend/src`, `backend/modes`, `backend/skills`)
+- `chore`: remaining tooling/config/infra files
+
+Title format per commit:
+- `<type>(<scope>): update <N> files`
+- scope is inferred by module (`backend`, `frontend`, `docs`, `skills`), fallback `repo`
+
+Body rules:
 - First section: short summary of change intent.
 - Second section: bullet list of key changed paths (top 10).
 
@@ -43,13 +48,19 @@ scripts/auto_commit_push.sh
 Optional overrides:
 
 ```bash
-scripts/auto_commit_push.sh --type feat --scope agent --summary "add multi-agent scheduler"
 scripts/auto_commit_push.sh --dry-run
+scripts/auto_commit_push.sh --single
+scripts/auto_commit_push.sh --type feat --scope backend --summary "add multi-agent scheduler"
 ```
+
+Notes:
+- `--single` forces one commit for all files.
+- `--type` or `--summary` implies `--single`.
 
 ## Constraints
 
 - Do not use interactive git commands.
 - Do not modify remote or branch config.
+- Do not collapse all files into one commit unless user explicitly asks or passes `--single`/`--type`.
 - If `origin` or current branch is missing, stop and report actionable error.
 - If push is rejected, stop and report git output; do not force push.
